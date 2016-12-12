@@ -180,10 +180,17 @@ class MerkleSignatureTree:
 				start_node = (self.leaf + 1 + (1 << h)) ^ (1 << h)
 				self.ths[h].initialize(start_node, h)
 
-		#update stacks
-		for th in self.ths:
-			th.update()
-			th.update()
+		#update stacks (classic traversal)
+		#for th in self.ths:
+		#	th.update()
+		#	th.update()
+
+		#update stacks (logarithmic traversal)
+		for _ in range(2*self.leafCalc.numLevels() - 1):
+			lows = [th.low for th in self.ths]
+			lmin = min(lows)
+			focus = lows.index(lmin)
+			self.ths[focus].update()
 
 		self.leaf += 1
 		return sig
@@ -288,6 +295,17 @@ def testOneTimeKeyGen():
 
 	assert(gen.getOTK(1234).__repr__() == gen.getOTK(1234).__repr__())
 
+def testLogMSS():
+	print 'Testing Logarithmic Merkle tree traversal'
+	key = 'a'*16
+	iv = 'b'*12
+	lc = LeafCalc(10, key, iv)
+
+	mss = MerkleSignatureTree(lc)
+	for i in range(lc.numLeaves()):
+		m = "Message %d" % i
+		sig = mss.sign(m)
+		verify(m, sig, mss.getPublicKey())
 def testMSS():
 	from Lamport import sha
 	key = 'a'*16
@@ -372,4 +390,5 @@ def testMSS():
 if __name__ == '__main__':
 	testOneTimeKeyGen()
 	testTreeHash()
-	testMSS()
+	#testMSS()
+	testLogMSS()
