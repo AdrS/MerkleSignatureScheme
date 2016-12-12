@@ -48,7 +48,9 @@ class LeafCalc:
 class TreeHash:
 	def initialize(self, start, max_height):
 		if start >= self.leafCalc.numLeaves():
-			raise InvalidLeafIndex()
+			self.state = [(None, self.max_height)]
+			return
+			#raise InvalidLeafIndex()
 		self.leaf = start
 		#keep track of lowest height node (except at start and end)
 		self.low = max_height
@@ -69,6 +71,7 @@ class TreeHash:
 	
 	def update(self):
 		if self.done():
+			return
 			print self.leafCalc.numLevels()
 			print self.leaf
 			print self.max_height
@@ -115,9 +118,10 @@ class MerkleSignatureTree:
 		for a in self.authPath:
 			self.pk = Lamport.sha(self.pk + a)
 
-		#get calculations going
+		#start computation of future authentication paths
 		for i, th in enumerate(self.ths):
 			th.initialize(0, i)
+			th.run()
 	
 	def sign(self, message):
 		if self.leaf >= self.leafCalc.numLeaves():
@@ -130,14 +134,6 @@ class MerkleSignatureTree:
 		#TODO: should tree parameters be part of signature???
 		sig = (pub.__repr__(), sigp, self.leaf, self.authPath[:])
 
-		print self.leaf
-		#update stacks
-		for _ in range(2*self.leafCalc.numLevels() - 1):
-			lows = [th.low for th in self.ths]
-			lmin = min(lows)
-			focus = lows.index(lmin)
-			#update focused stack
-			self.ths[focus].update()
 
 		#refresh auth nodes
 		for h in range(self.leafCalc.numLevels()):
@@ -147,6 +143,11 @@ class MerkleSignatureTree:
 
 				start_node = (self.leaf + 1 + (1 << h)) ^ (1 << h)
 				self.ths[h].initialize(start_node, h)
+
+		#update stacks
+		for th in self.ths:
+			th.update()
+			th.update()
 
 		self.leaf += 1
 		return sig
@@ -257,19 +258,57 @@ def testMSS():
 	mss = MerkleSignatureTree(lc)
 	#check initial authentication path generation
 	assert(mss.authPath == [l[1], l11, l21])
+	assert(mss.ths[0].state == [(l[0], 0)])
+	assert(mss.ths[1].state == [(l10, 1)])
+	assert(mss.ths[2].state == [(l20, 2)])
 	assert(mss.getPublicKey() == rt)
 
 	m1 = "Message 1"
 	sig1 = mss.sign(m1)
 	verify(m1, sig1, mss.getPublicKey())
 
-	#TODO: auth path updating does not work yet
 	#check that authentication path is updated
 	assert(mss.authPath == [l[0], l11, l21])
+	assert(mss.ths[0].state == [(l[3], 0)])
+	assert(mss.ths[1].state == [(l10, 1)])
+	assert(mss.ths[2].state == [(l20, 2)])
 
 	m2 = "Message 2"
 	sig2 = mss.sign(m2)
 	verify(m2, sig2, mss.getPublicKey())
+
+	assert(mss.authPath == [l[3], l10, l21])
+	assert(mss.ths[0].state == [(l[2], 0)])
+	assert(mss.ths[1].state == [(l[6], 0), (l[7], 0)])
+	assert(mss.ths[2].state == [(l20, 2)])
+
+	m3 = "Message 3"
+	sig3 = mss.sign(m3)
+	verify(m3, sig3, mss.getPublicKey())
+
+	assert(mss.authPath == [l[2], l10, l21])
+	assert(mss.ths[0].state == [(l[5], 0)])
+	assert(mss.ths[1].state == [(l13, 1)])
+	assert(mss.ths[2].state == [(l20, 2)])
+
+	m4 = "Message 4"
+	sig4 = mss.sign(m4)
+	verify(m4, sig4, mss.getPublicKey())
+
+	assert(mss.authPath == [l[5], l13, l20])
+	assert(mss.ths[0].state == [(l[4], 0)])
+	assert(mss.ths[1].state == [(l[4], 0), (l[5], 0)])
+	#assert(mss.ths[2].state == [(l20, 2)])
+
+	m5 = "Message 5"
+	sig5 = mss.sign(m5)
+	verify(m5, sig5, mss.getPublicKey())
+
+	assert(mss.authPath == [l[4], l13, l20])
+	assert(mss.ths[0].state == [(l[7], 0)])
+	assert(mss.ths[1].state == [(l12, 1)])
+	#assert(mss.ths[2].state == [(l20, 2)])
+
 
 	lc = LeafCalc(10)
 	mss = MerkleSignatureTree(lc)
