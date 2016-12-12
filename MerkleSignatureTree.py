@@ -16,9 +16,6 @@ def lg(n):
 		n /= 2
 	return l
 
-def bytes2int(byte_string):
-	return int(byte_string.encode('hex'), 16)
-
 def int2bytes(i):
 	return struct.pack(">I", i)
 
@@ -106,14 +103,7 @@ class TreeHash:
 		return self.state[0][0]
 	
 	def update(self):
-		if self.done():
-			return
-			print self.leafCalc.numLevels()
-			print self.leaf
-			print self.max_height
-			print self.low
-			print self.state
-			assert(False)
+		if self.done(): return
 		#if top two nodes have same height
 		if len(self.state) >= 2 and self.state[-2][1] == self.state[-1][1]:
 			right = self.state.pop()
@@ -139,9 +129,9 @@ class TreeHash:
 
 class MerkleSignatureTree:
 	def __init__(self, leafCalc):
+		self.leafCalc = leafCalc
 		#start signing from first leaf
 		self.leaf = 0
-		self.leafCalc = leafCalc
 
 		#calculate first authentication path
 		height = leafCalc.numLevels()
@@ -299,14 +289,14 @@ def testLogMSS():
 	print 'Testing Logarithmic Merkle tree traversal'
 	key = 'a'*16
 	iv = 'b'*12
-	lc = LeafCalc(10, key, iv)
+	lc = LeafCalc(5, key, iv)
 
 	mss = MerkleSignatureTree(lc)
 	for i in range(lc.numLeaves()):
 		m = "Message %d" % i
 		sig = mss.sign(m)
 		verify(m, sig, mss.getPublicKey())
-def testMSS():
+def testClassicMSS():
 	from Lamport import sha
 	key = 'a'*16
 	iv = 'b'*12
@@ -390,5 +380,5 @@ def testMSS():
 if __name__ == '__main__':
 	testOneTimeKeyGen()
 	testTreeHash()
-	#testMSS()
+	#testClassicMSS()
 	testLogMSS()
