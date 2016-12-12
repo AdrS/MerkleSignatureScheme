@@ -1,4 +1,6 @@
 import Lamport
+import struct
+from Crypto.Cipher import AES
 
 class InvalidInputLength(Exception): pass
 class KeysAllUsed(Exception): pass
@@ -14,30 +16,64 @@ def lg(n):
 		n /= 2
 	return l
 
+def bytes2int(byte_string):
+	return int(byte_string.encode('hex'), 16)
+
+def int2bytes(i):
+	return struct.pack(">I", i)
+
+class OneTimeKeyGenerator:
+	def __init__(self, key, iv):
+		'''Generates pseudo random bytes for one time keys using AES-CTR mode
+		key is 16 bytes, iv is 12 bytes'''
+		if len(key) != AES.block_size or len(iv) != AES.block_size - 4:
+			raise InvalidInputLength()
+		self.__key = key
+		self.__iv = iv
+		self.__block_per_key = (256*2*32)/AES.block_size
+		self.__cipher = AES.new(key, AES.MODE_ECB)
+
+	def getOTK(self, i):
+		'''returns part of stream for ith one time key'''
+		#only handle leaves up to index ~2^24
+		if (i * self.__block_per_key) > (1 << 31):
+			raise InvalidLeafIndex()
+
+		start = i * self.__block_per_key
+		#generates blocks of random stream for one time key i
+		blocks = []
+		for j in range(start, start + self.__block_per_key):
+			blocks.append(self.__cipher.encrypt(self.__iv + int2bytes(j)))
+		return Lamport.PrivateKey(''.join(blocks))
+		
 class LeafCalc:
-	def __init__(self, levels):
+	def __init__(self, levels, key, iv):
+		self.__gen = OneTimeKeyGenerator(key, iv)
 		self.__N = 2**levels
 		self.__levels = levels
-		self.leaves = [None] * self.__N
+		self.__cached_otk = None
+		self.__cached_idx = -1
 	
 	def ensureLeafExists(self, i):
+		'''ensures that ith otk is in internal cache'''
 		if i >= self.__N:
 			raise InvalidLeafIndex()
-		if self.leaves[i] == None:
-			self.leaves[i] = Lamport.gen()
+		#if leaf not in cache, regenerate it
+		if self.__cached_otk != i:
+			self.__cached_otk = self.__gen.getOTK(i)
+			self.__cached_idx = i
 
 	def getLeaf(self, i):
-		self.ensureLeafExists(i)
 		#leaf is hash of one time public key
-		return Lamport.sha(self.leaves[i][1].__repr__())
+		return Lamport.sha(self.getPublicKey(i).__repr__())
 
 	def getPublicKey(self, i):
 		self.ensureLeafExists(i)
-		return self.leaves[i][1]
+		return self.__cached_otk.getPublicKey()
 
 	def getPrivateKey(self, i):
 		self.ensureLeafExists(i)
-		return self.leaves[i][0]
+		return self.__cached_otk
 	
 	def numLeaves(self):
 		return self.__N
@@ -185,18 +221,10 @@ def verify(message, signature, public_key):
 	if cur_node != public_key: raise InvalidSignature()
 	#TODO: put this function in public key class
 
-class PublicKey:
-	def __init__(self, tree_root):
-		if len(tree_root) != 32:
-			raise InvalidInputLength()
-		self.__key = tree_root
-	
-	def verify(self, message, signature):
-		#TODO: check signature length
-		raise InvalidSignature()
-
 def testTreeHash():
-	lc = LeafCalc(2)
+	key = 'a'*16
+	iv = 'b'*12
+	lc = LeafCalc(2, key, iv)
 	l = [lc.getLeaf(i) for i in range(4)]
 	i1 = Lamport.sha(l[0] + l[1])
 	i2 = Lamport.sha(l[2] + l[3])
@@ -243,9 +271,28 @@ def testTreeHash():
 	assert(th.state == [(i2, 1)])
 	#TODO: finish me
 
+def testOneTimeKeyGen():
+	key = 'a'*16
+	iv = 'b'*12
+	c = AES.new(key, AES.MODE_ECB)
+	gen = OneTimeKeyGenerator(key, iv)
+	k0 = gen.getOTK(0).__repr__()[len('private key:'):]
+	assert(len(k0) == 2*256*32)
+	assert(c.encrypt(iv + '\x00'*4) == k0[:16])
+	assert(c.encrypt(iv + '\x00\x00\x03\xff') == k0[-16:])
+
+	k128 = gen.getOTK(128).__repr__()[len('private key:'):]
+	assert(len(k128) == 2*256*32)
+	assert(c.encrypt(iv + '\x00\x02\x00\x00') == k128[:16])
+	assert(c.encrypt(iv + '\x00\x02\x03\xff') == k128[-16:])
+
+	assert(gen.getOTK(1234).__repr__() == gen.getOTK(1234).__repr__())
+
 def testMSS():
 	from Lamport import sha
-	lc = LeafCalc(3)
+	key = 'a'*16
+	iv = 'b'*12
+	lc = LeafCalc(3, key, iv)
 	l = [lc.getLeaf(i) for i in range(8)]
 	l10 = sha(l[0] + l[1])
 	l11 = sha(l[2] + l[3])
@@ -265,6 +312,7 @@ def testMSS():
 
 	m1 = "Message 1"
 	sig1 = mss.sign(m1)
+
 	verify(m1, sig1, mss.getPublicKey())
 
 	#check that authentication path is updated
@@ -310,7 +358,7 @@ def testMSS():
 	#assert(mss.ths[2].state == [(l20, 2)])
 
 
-	lc = LeafCalc(10)
+	lc = LeafCalc(10, key, iv)
 	mss = MerkleSignatureTree(lc)
 	for i in range(lc.numLeaves()):
 		m = "Message %d" % i
@@ -322,5 +370,6 @@ def testMSS():
 	#invalid authentication path
 	
 if __name__ == '__main__':
+	testOneTimeKeyGen()
 	testTreeHash()
 	testMSS()
