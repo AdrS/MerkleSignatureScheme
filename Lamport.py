@@ -6,6 +6,7 @@ class InvalidInputLength(Exception): pass
 class OneTimeKeyAlreadyUsed(Exception): pass
 class InvalidSignature(Exception): pass
 
+#TODO: put in util module
 def splitString(byte_string, chunk_size):
 	'''Splits string into chunk_size pieces'''
 	num_chunks = len(byte_string)/chunk_size
@@ -91,6 +92,8 @@ class PrivateKey:
 
 def gen(compute_public_key=True):
 	'''Generates a Lamport one time signature key pair'''
+	#NOTE: urandom is suitible for cryptographic random number generation
+	#	see: https://docs.python.org/3/library/os.html#os.urandom
 	sk = PrivateKey(urandom(256*2*32))
 	pk = None
 	#only compute public key if needed
@@ -100,6 +103,10 @@ def gen(compute_public_key=True):
 
 def test():
 	sk, pk = gen()
+
+	#test when public key generation is disabled
+	sk2, pk2 = gen(False)
+	assert(not pk2)
 
 	#test that public and private keys match
 	assert(str(sk.getPublicKey()) == str(pk))

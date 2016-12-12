@@ -46,7 +46,7 @@ class LeafCalc:
 		return self.__levels
 
 class TreeHash:
-	def initialize(self, start, max_height, top=None):
+	def initialize(self, start, max_height):
 		if start >= self.leafCalc.numLeaves():
 			raise InvalidLeafIndex()
 		self.leaf = start
@@ -55,8 +55,6 @@ class TreeHash:
 		self.max_height = max_height
 		#stack to hold (node hash, node height) pairs
 		self.state = []
-		if top:
-			self.state.append(top)
 
 	def __init__(self, start, max_height, leafCalc):
 		self.leafCalc = leafCalc
@@ -70,6 +68,13 @@ class TreeHash:
 		return self.state[0][0]
 	
 	def update(self):
+		if self.done():
+			print self.leafCalc.numLevels()
+			print self.leaf
+			print self.max_height
+			print self.low
+			print self.state
+			assert(False)
 		#if top two nodes have same height
 		if len(self.state) >= 2 and self.state[-2][1] == self.state[-1][1]:
 			right = self.state.pop()
@@ -86,6 +91,8 @@ class TreeHash:
 			self.state.append((self.leafCalc.getLeaf(self.leaf), 0))
 			self.leaf += 1
 			self.low = 0
+		if self.done():
+			self.low = (1 << 31) #set to infty
 
 	def run(self):
 		while not self.done(): self.update()
@@ -107,6 +114,10 @@ class MerkleSignatureTree:
 		self.pk = leafCalc.getLeaf(0)
 		for a in self.authPath:
 			self.pk = Lamport.sha(self.pk + a)
+
+		#get calculations going
+		for i, th in enumerate(self.ths):
+			th.initialize(0, i)
 	
 	def sign(self, message):
 		if self.leaf >= self.leafCalc.numLeaves():
@@ -117,16 +128,27 @@ class MerkleSignatureTree:
 		sigp = priv.sign(message)
 
 		#TODO: should tree parameters be part of signature???
-		sig = (pub.__repr__(), sigp, self.leaf, self.authPath)
+		sig = (pub.__repr__(), sigp, self.leaf, self.authPath[:])
+
+		print self.leaf
+		#update stacks
+		for _ in range(2*self.leafCalc.numLevels() - 1):
+			lows = [th.low for th in self.ths]
+			lmin = min(lows)
+			focus = lows.index(lmin)
+			#update focused stack
+			self.ths[focus].update()
 
 		#refresh auth nodes
-		for h in range(self.leafCalc.numLeaves()):
+		for h in range(self.leafCalc.numLevels()):
 			#check if auth node at level needs refresh
 			if (self.leaf + 1) % (2 ** h) == 0:
+				self.authPath[h] = self.ths[h].root()
+
 				start_node = (self.leaf + 1 + (1 << h)) ^ (1 << h)
 				self.ths[h].initialize(start_node, h)
-		#build stacks
-		#TODO: write me!!!
+
+		self.leaf += 1
 		return sig
 
 	def getPublicKey(self):
@@ -160,6 +182,7 @@ def verify(message, signature, public_key):
 			cur_node = Lamport.sha(cur_node + a)
 		idx /= 2
 	if cur_node != public_key: raise InvalidSignature()
+	#TODO: put this function in public key class
 
 class PublicKey:
 	def __init__(self, tree_root):
@@ -237,9 +260,23 @@ def testMSS():
 	assert(mss.getPublicKey() == rt)
 
 	m1 = "Message 1"
-	sig0 = mss.sign(m1)
-	verify(m1, sig0, mss.getPublicKey())
+	sig1 = mss.sign(m1)
+	verify(m1, sig1, mss.getPublicKey())
 
+	#TODO: auth path updating does not work yet
+	#check that authentication path is updated
+	assert(mss.authPath == [l[0], l11, l21])
+
+	m2 = "Message 2"
+	sig2 = mss.sign(m2)
+	verify(m2, sig2, mss.getPublicKey())
+
+	lc = LeafCalc(10)
+	mss = MerkleSignatureTree(lc)
+	for i in range(lc.numLeaves()):
+		m = "Message %d" % i
+		sig = mss.sign(m)
+		verify(m, sig, mss.getPublicKey())
 	#TODO: test verify
 	#-malformed
 	#1 time sig doesn't match
