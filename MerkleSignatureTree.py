@@ -198,7 +198,10 @@ def verify(message, signature, public_key):
 	except Lamport.InvalidInputLength:
 		raise InvalidSignature()
 	#verify message against one time signature
-	pub.verify(message, signature[1])
+	try:
+		pub.verify(message, signature[1])
+	except Lamport.InvalidSignature:
+		raise InvalidSignature()
 
 	authPath = signature[3]
 	height = len(authPath)

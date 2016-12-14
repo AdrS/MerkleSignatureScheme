@@ -106,43 +106,54 @@ def usage():
 	usage_string = '''
 	usage:
 	./demo -g <height> <private key file> <public key file>
-	./demo -s <private key> <file> <signature file>
+	./demo -s <private key> <list of files to sign>
 	./demo -v <public key> <file> <signature file>
 	'''
 	exitErr(usage_string)
 
 if __name__ == '__main__':
-	if len(sys.argv) != 5: usage()
-	if sys.argv[1] in ('-g', '--generate-key-pair'):
-		h = int(sys.argv[2])
-		if h < 1 or h > 20:
-			exitErr('error: height must be between 1 and 20')
-		genKeyPair(sys.argv[3], sys.argv[4], h)
-	elif sys.argv[1] in ('-s', '--sign'):
-		#TODO: have it read the leaf index to use
-		#read private key file
-		key, iv, height = openPrivKey(sys.argv[2])
-		lc = MerkleSignatureTree.LeafCalc(height, key, iv)
-		mss = MerkleSignatureTree.MerkleSignatureTree(lc)
+	if len(sys.argv) == 5:
+		if sys.argv[1] in ('-g', '--generate-key-pair'):
+			h = int(sys.argv[2])
+			if h < 1 or h > 20:
+				exitErr('error: height must be between 1 and 20')
+			genKeyPair(sys.argv[3], sys.argv[4], h)
+			exit(0)
+		elif sys.argv[1] in ('-v', '--verify'):
+			#read public key file
+			pk = openPubKey(sys.argv[2])
 
-		#read message
-		with open(sys.argv[3], 'rb') as f: data = f.read()
+			#read message
+			with open(sys.argv[3], 'rb') as f: data = f.read()
 
-		writeSig(mss.sign(data), sys.argv[4])
-	elif sys.argv[1] in ('-v', '--verify'):
-		#read public key file
-		pk = openPubKey(sys.argv[2])
+			#read signature
+			sig = openSig(sys.argv[4])
 
-		#read message
-		with open(sys.argv[3], 'rb') as f: data = f.read()
+			try:
+				MerkleSignatureTree.verify(data, sig, pk)
+			except MerkleSignatureTree.InvalidSignature:
+				exitErr('INVALID SIGNATURE!!!!')
+			print 'signature valid'
+			exit(0)
+	elif len(sys.argv) > 3 and sys.argv[1] in ('-s', '--sign'):
+			#TODO: have it read the leaf index to use
+			#read private key file
+			key, iv, height = openPrivKey(sys.argv[2])
+			lc = MerkleSignatureTree.LeafCalc(height, key, iv)
+			mss = MerkleSignatureTree.MerkleSignatureTree(lc)
 
-		#read signature
-		sig = openSig(sys.argv[4])
-
-		try:
-			MerkleSignatureTree.verify(data, sig, pk)
-		except MerkleSignatureTree.InvalidSignature:
-			exitErr('INVALID SIGNATURE!!!!')
-		print 'signature valid'
-	else:
-		exitErr('error: unrecognized option')
+			for path in sys.argv[3:]:
+				print 'Signing file %s ...' % path
+				try:
+					f = open(path, 'rb')
+					data = f.read()
+				except:
+					print 'error: could not read file %s' % f
+				else:
+					try: 
+						writeSig(mss.sign(data), path + '.sig')
+					except MerkleSignatureTree.KeysAllUsed:
+						exitErr('error: all one time signing keys used')
+			exit(0)
+	#default to printing usage
+	usage()
